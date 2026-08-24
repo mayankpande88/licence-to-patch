@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mayankpande88/licence-to-patch/internal/brief"
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
 	"github.com/mayankpande88/licence-to-patch/internal/verdict"
 )
@@ -22,6 +23,7 @@ import (
 type output struct {
 	depdiff.Report
 	Preliminary verdict.Verdict `json:"preliminary"`
+	Markdown    string          `json:"markdown"`
 }
 
 func main() {
@@ -34,6 +36,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "depdiff: %v\n", err)
 		os.Exit(1)
 	}
-	out, _ := json.MarshalIndent(output{Report: rep, Preliminary: verdict.Classify(rep)}, "", "  ")
+	v := verdict.Classify(rep)
+	out, _ := json.MarshalIndent(output{Report: rep, Preliminary: v, Markdown: brief.Explain(rep, v)}, "", "  ")
 	fmt.Println(string(out))
 }

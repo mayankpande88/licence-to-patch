@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -34,7 +35,13 @@ func main() {
 	// could post reviews with GITHUB_TOKEN, so do not expose it on a shared host
 	// without adding real authentication in front.
 	addr := flag.String("addr", "127.0.0.1:8972", "listen address for the streamable-HTTP MCP server")
+	allowRemote := flag.Bool("allow-remote", false, "permit binding to a non-loopback address (unauthenticated — do not use without an auth proxy)")
 	flag.Parse()
+
+	if !*allowRemote && !isLoopback(*addr) {
+		log.Fatalf("refusing to bind %q: this server has no authentication and exposes a destructive action; "+
+			"keep it on loopback, or pass -allow-remote only behind an auth proxy", *addr)
+	}
 
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
@@ -76,6 +83,20 @@ func main() {
 	if err := httpServer.Start(*addr); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+// isLoopback reports whether addr binds only to the loopback interface. An empty
+// host (e.g. ":8972") binds to all interfaces and is treated as non-loopback.
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func handler(client *ghreview.Client) server.ToolHandlerFunc {
