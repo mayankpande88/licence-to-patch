@@ -1,9 +1,10 @@
-// Command review-mcp exposes the gated "post a PR review" action as an MCP
-// server over streamable HTTP.
+// Command review-mcp exposes the "post a PR review" action as an MCP server over
+// streamable HTTP.
 //
-// The single tool, post_pr_review, is annotated DESTRUCTIVE so the TrueForge
-// harness pauses for human approval before it runs — the agent may assemble the
-// trust brief on its own, but a person signs off before anything lands on the PR.
+// The single tool, post_pr_review, is intentionally UN-gated: posting a review is
+// advisory feedback, not an irreversible change, so it should not stop to ask. The
+// human-approval gate lives on the action that actually rewrites the code — see
+// fix-mcp's revert_bump_on_pr.
 //
 // The GitHub token is read from GITHUB_TOKEN and stays in this process; it never
 // reaches the model or the sandbox.
@@ -69,11 +70,9 @@ func main() {
 			mcp.Description("One of COMMENT, REQUEST_CHANGES, APPROVE"),
 			mcp.Enum("COMMENT", "REQUEST_CHANGES", "APPROVE")),
 		mcp.WithString("body", mcp.Required(), mcp.Description("Markdown body of the review (the trust brief)")),
-		// Destructive: the harness gates this behind human approval.
-		mcp.WithToolAnnotation(mcp.ToolAnnotation{
-			ReadOnlyHint:    mcp.ToBoolPtr(false),
-			DestructiveHint: mcp.ToBoolPtr(true),
-		}),
+		// Intentionally left un-annotated so the harness does NOT gate it: posting a
+		// review is advisory feedback, not an irreversible change. The gate belongs on
+		// the code-changing action (see fix-mcp's revert_bump_on_pr), not on a comment.
 	)
 
 	s.AddTool(tool, handler(client))
