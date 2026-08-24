@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/mayankpande88/licence-to-patch/internal/fix"
+	"github.com/mayankpande88/licence-to-patch/internal/ghreview"
 )
 
 func main() {
@@ -67,6 +69,29 @@ func main() {
 
 	s.AddTool(tool, handler(fixer))
 
+	// Alternative fix for a Dependabot PR: ask Dependabot to drop the module and
+	// rebuild the group, instead of editing the branch ourselves. Also gated —
+	// it triggers a real PR rewrite.
+	gh := ghreview.New(token)
+	dependabotTool := mcp.NewTool(
+		"hold_via_dependabot",
+		mcp.WithDescription(
+			"Fix a grouped Dependabot PR the idiomatic way: comment `@dependabot ignore <module>` "+
+				"and `@dependabot recreate` so Dependabot rebuilds the group WITHOUT the unsafe module. "+
+				"Note: ignore also stops future updates to that module until unignored. Triggers a PR "+
+				"rewrite, so it pauses for human approval first.",
+		),
+		mcp.WithString("owner", mcp.Required(), mcp.Description("Repository owner")),
+		mcp.WithString("repo", mcp.Required(), mcp.Description("Repository name")),
+		mcp.WithNumber("pull_number", mcp.Required(), mcp.Description("Pull request number")),
+		mcp.WithString("module", mcp.Required(), mcp.Description("The module path to drop from the group")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint:    mcp.ToBoolPtr(false),
+			DestructiveHint: mcp.ToBoolPtr(true),
+		}),
+	)
+	s.AddTool(dependabotTool, dependabotHandler(gh))
+
 	log.Printf("fix MCP server (streamable HTTP) listening on %s (endpoint /mcp)", *addr)
 	if err := server.NewStreamableHTTPServer(s).Start(*addr); err != nil {
 		log.Fatalf("server error: %v", err)
@@ -96,6 +121,38 @@ func handler(fixer *fix.Fixer) server.ToolHandlerFunc {
 		res, err := fixer.RevertBump(ctx, owner, repo, branch, module, safe)
 		if err != nil {
 			return mcp.NewToolResultErrorf("revert failed: %v", err), nil
+		}
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultErrorf("marshal failed: %v", err), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	}
+}
+
+func dependabotHandler(gh *ghreview.Client) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		owner, err := req.RequireString("owner")
+		if err != nil {
+			return mcp.NewToolResultErrorf("invalid 'owner': %v", err), nil
+		}
+		repo, err := req.RequireString("repo")
+		if err != nil {
+			return mcp.NewToolResultErrorf("invalid 'repo': %v", err), nil
+		}
+		number, err := req.RequireInt("pull_number")
+		if err != nil || number <= 0 {
+			return mcp.NewToolResultError("invalid 'pull_number'"), nil
+		}
+		module, err := req.RequireString("module")
+		if err != nil {
+			return mcp.NewToolResultErrorf("invalid 'module': %v", err), nil
+		}
+
+		body := fmt.Sprintf("@dependabot ignore %s\n@dependabot recreate", module)
+		res, err := gh.PostComment(ctx, owner, repo, number, body)
+		if err != nil {
+			return mcp.NewToolResultErrorf("dependabot comment failed: %v", err), nil
 		}
 		out, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {

@@ -74,6 +74,42 @@ func TestPostReview_RejectsMalformedOwnerRepo(t *testing.T) {
 	}
 }
 
+func TestPostComment_ShapesRequest(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":7,"html_url":"https://example/c/7"}`)
+	}))
+	defer srv.Close()
+
+	c := New("tok")
+	c.BaseURL = srv.URL
+	res, err := c.PostComment(context.Background(), "own", "rep", 3, "@dependabot recreate")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/repos/own/rep/issues/3/comments" {
+		t.Errorf("path = %s", gotPath)
+	}
+	if gotBody["body"] != "@dependabot recreate" {
+		t.Errorf("body = %v", gotBody)
+	}
+	if res.ReviewID != 7 {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestPostComment_RejectsMalformed(t *testing.T) {
+	c := New("tok")
+	if _, err := c.PostComment(context.Background(), "own/../x", "rep", 1, "x"); err == nil {
+		t.Fatal("expected rejection for malformed owner")
+	}
+}
+
 func TestPostReview_SurfacesAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)

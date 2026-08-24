@@ -118,3 +118,51 @@ func (c *Client) PostReview(ctx context.Context, owner, repo string, number int,
 	}
 	return Result{ReviewID: out.ID, State: out.State, HTMLURL: out.HTMLURL}, nil
 }
+
+// PostComment posts a plain issue comment on a pull request. Used for Dependabot
+// chat-ops (e.g. "@dependabot recreate") — unlike a review it is not a verdict,
+// but it still triggers a real change, so its caller gates it.
+func (c *Client) PostComment(ctx context.Context, owner, repo string, number int, body string) (Result, error) {
+	if c.Token == "" {
+		return Result{}, fmt.Errorf("no GitHub token configured")
+	}
+	if !nameRe.MatchString(owner) {
+		return Result{}, fmt.Errorf("invalid owner %q", owner)
+	}
+	if !nameRe.MatchString(repo) {
+		return Result{}, fmt.Errorf("invalid repo %q", repo)
+	}
+	if number <= 0 {
+		return Result{}, fmt.Errorf("invalid pull number %d", number)
+	}
+
+	payload, err := json.Marshal(map[string]any{"body": body})
+	if err != nil {
+		return Result{}, err
+	}
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", c.BaseURL, owner, repo, number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return Result{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return Result{}, fmt.Errorf("posting comment: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode/100 != 2 {
+		return Result{}, fmt.Errorf("github returned %s: %s", resp.Status, bytes.TrimSpace(raw))
+	}
+	var out struct {
+		ID      int64  `json:"id"`
+		HTMLURL string `json:"html_url"`
+	}
+	_ = json.Unmarshal(raw, &out)
+	return Result{ReviewID: out.ID, State: "commented", HTMLURL: out.HTMLURL}, nil
+}
