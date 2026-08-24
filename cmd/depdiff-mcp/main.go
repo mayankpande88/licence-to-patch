@@ -45,9 +45,11 @@ func main() {
 	addr := flag.String("addr", ":8971", "listen address for the streamable-HTTP MCP server")
 	flag.Parse()
 
+	// 0.2.0: the tool result dropped the `markdown` field (now returns evidence
+	// only). Bumped per semver so the contract change is visible to clients.
 	s := server.NewMCPServer(
 		"licence-to-patch-depdiff",
-		"0.1.0",
+		"0.2.0",
 		server.WithToolCapabilities(true),
 	)
 
