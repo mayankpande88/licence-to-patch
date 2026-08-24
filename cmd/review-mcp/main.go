@@ -10,14 +10,16 @@
 //
 // Usage:
 //
-//	GITHUB_TOKEN=... review-mcp [-addr :8972]
+//	GITHUB_TOKEN=... review-mcp [-addr 127.0.0.1:8972]
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
+	"math"
 	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -27,7 +29,11 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8972", "listen address for the streamable-HTTP MCP server")
+	// Bind to loopback by default: this exposes a DESTRUCTIVE action and the only
+	// gate is the harness, which runs locally. Anything reachable on the port
+	// could post reviews with GITHUB_TOKEN, so do not expose it on a shared host
+	// without adding real authentication in front.
+	addr := flag.String("addr", "127.0.0.1:8972", "listen address for the streamable-HTTP MCP server")
 	flag.Parse()
 
 	token := os.Getenv("GITHUB_TOKEN")
@@ -76,30 +82,51 @@ func handler(client *ghreview.Client) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		owner, err := req.RequireString("owner")
 		if err != nil {
-			return mcp.NewToolResultError("owner is required"), nil
+			return mcp.NewToolResultErrorf("invalid 'owner': %v", err), nil
 		}
 		repo, err := req.RequireString("repo")
 		if err != nil {
-			return mcp.NewToolResultError("repo is required"), nil
+			return mcp.NewToolResultErrorf("invalid 'repo': %v", err), nil
 		}
-		number, err := req.RequireInt("pull_number")
+		number, err := pullNumber(req)
 		if err != nil {
-			return mcp.NewToolResultError("pull_number is required"), nil
+			return mcp.NewToolResultErrorf("invalid 'pull_number': %v", err), nil
 		}
 		event, err := req.RequireString("event")
 		if err != nil {
-			return mcp.NewToolResultError("event is required"), nil
+			return mcp.NewToolResultErrorf("invalid 'event': %v", err), nil
 		}
 		body, err := req.RequireString("body")
 		if err != nil {
-			return mcp.NewToolResultError("body is required"), nil
+			return mcp.NewToolResultErrorf("invalid 'body': %v", err), nil
 		}
 
 		res, err := client.PostReview(ctx, owner, repo, number, ghreview.Event(event), body)
 		if err != nil {
 			return mcp.NewToolResultErrorf("post review failed: %v", err), nil
 		}
-		out, _ := json.MarshalIndent(res, "", "  ")
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultErrorf("marshal failed: %v", err), nil
+		}
 		return mcp.NewToolResultText(string(out)), nil
 	}
+}
+
+// pullNumber reads pull_number as a strict positive integer. JSON numbers arrive
+// as float64, so RequireInt would silently truncate 7.9 -> 7 and review the
+// wrong PR; reject any non-integral or non-positive value instead.
+func pullNumber(req mcp.CallToolRequest) (int, error) {
+	raw, ok := req.GetArguments()["pull_number"]
+	if !ok {
+		return 0, fmt.Errorf("missing")
+	}
+	f, ok := raw.(float64)
+	if !ok {
+		return 0, fmt.Errorf("must be a number")
+	}
+	if f != math.Trunc(f) || f <= 0 {
+		return 0, fmt.Errorf("must be a positive whole number, got %v", f)
+	}
+	return int(f), nil
 }
