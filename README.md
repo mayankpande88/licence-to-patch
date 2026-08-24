@@ -30,11 +30,12 @@ The approval gate is on the **fix**, not the comment: posting a review is advice
                  TrueForge harness (loop · approvals · sandbox · session · subagents)
                                           │
      ┌───────────┬───────────┬───────────┼───────────────┬──────────────────────┐
- github (MCP)  depdiff(MCP) sandbox    review (MCP)    fix (MCP)             verdict/brief
+ github (MCP)  depdiff(MCP) sandbox    review (MCP)    fix (MCP)             verdict (hint)
  read the PR   diff a Go    go build   post the trust  revert_bump_on_pr     deterministic
  & its bumps   dep's source + go test  brief comment   (edit branch) OR      ACCEPT/CAUTION/
-               between two  (live      (ADVISORY —     hold_via_dependabot   HOLD + detailed
-               versions     green CI)  ungated)        (@dependabot ...)     markdown
+               → evidence   reach-     (ADVISORY —     hold_via_dependabot   HOLD as a hint;
+               (facts +     ability +  ungated)        (@dependabot ...)     the AGENT reasons
+               hint)        green CI)                                        & writes the brief
                                                        → GATED (human
                                                          approves the fix)
 ```
@@ -56,10 +57,10 @@ The gate belongs on the code-changing fix, not on posting a comment. The right l
 
 ## Components
 
-- `cmd/depdiff-mcp` — MCP server: `diff_go_dependency(module, from, to)`. Downloads both versions, diffs the source, returns findings + a preliminary verdict + a review-ready markdown explanation. Read-only.
+- `cmd/depdiff-mcp` — MCP server: `diff_go_dependency(module, from, to)`. Downloads both versions, diffs the source, and returns **evidence**: the changed api-version literals, removed exported symbols, files-changed count, and a *preliminary* verdict as a hint. It deliberately does **not** return a finished recommendation — reasoning about which changes this repo actually reaches, weighing the tests, and writing the brief is the agent's job. Read-only.
 - `cmd/review-mcp` — MCP server: `post_pr_review(owner, repo, pull_number, event, body)`. Advisory (ungated via the agent's policy).
 - `cmd/fix-mcp` — MCP server, the gated code-changing actions: `revert_bump_on_pr` (clone the PR branch, pin the module back, `go mod tidy`, commit, push) and `hold_via_dependabot` (comment `@dependabot ignore <module>` + `@dependabot recreate`).
-- `internal/depdiff` · `internal/verdict` · `internal/brief` — detection core, ACCEPT/CAUTION/HOLD classifier, and the *what/why/recommendation* renderer.
+- `internal/depdiff` · `internal/verdict` · `internal/brief` — detection core, ACCEPT/CAUTION/HOLD classifier, and the *what/why/recommendation* renderer. The renderer is used only by the standalone `tools/depdiff` CLI (a human runs it directly); in the agent path the agent writes the brief itself from the tool's evidence.
 - `internal/ghreview` · `internal/fix` — GitHub reviews/comments client and the branch-revert logic.
 - `tools/depdiff` — the detection core as a CLI.
 
