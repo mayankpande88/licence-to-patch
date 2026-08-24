@@ -11,6 +11,7 @@ package verdict
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
 )
@@ -47,11 +48,15 @@ type Verdict struct {
 func Classify(rep depdiff.Report) Verdict {
 	v := Verdict{Module: rep.Module, From: rep.FromVersion, To: rep.ToVersion, Level: Accept}
 
-	for _, c := range rep.APIVersionChanges {
+	// One bounded reason regardless of how many files carry the change — the
+	// per-file detail already lives in rep.APIVersionChanges, so we cite a single
+	// example rather than duplicating every entry into the payload.
+	if n := len(rep.APIVersionChanges); n > 0 {
 		v.Level = Hold
+		ex := rep.APIVersionChanges[0]
 		v.Reasons = append(v.Reasons, fmt.Sprintf(
-			"%s changes the REST api-version from %s to %s — a runtime contract change that compiles and passes mocked tests but can be rejected by the live service",
-			c.File, c.From, c.To))
+			"%d REST api-version change(s), e.g. %s: %s → %s — a runtime contract change that compiles and passes mocked tests but can be rejected by the live service",
+			n, ex.File, ex.From, ex.To))
 	}
 
 	if len(rep.RemovedSymbols) > 0 {
@@ -72,18 +77,7 @@ func Classify(rep depdiff.Report) Verdict {
 func preview(names []string) string {
 	const max = 3
 	if len(names) <= max {
-		return join(names)
+		return strings.Join(names, ", ")
 	}
-	return fmt.Sprintf("%s, …", join(names[:max]))
-}
-
-func join(names []string) string {
-	out := ""
-	for i, n := range names {
-		if i > 0 {
-			out += ", "
-		}
-		out += n
-	}
-	return out
+	return strings.Join(names[:max], ", ") + ", …"
 }
