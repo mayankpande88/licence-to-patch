@@ -80,25 +80,28 @@ func (f *Fixer) RevertBump(ctx context.Context, owner, repo, branch, module, saf
 	}
 	defer cleanup()
 
+	// Clone into a subdirectory, not dir itself — dir already holds the throwaway
+	// git config, so `git clone … .` there fails on a non-empty destination.
+	repoDir := filepath.Join(dir, "repo")
 	url := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
-	if out, err := f.run(ctx, dir, gitEnv, "git", "clone", "--branch", branch, "--depth", "1", url, "."); err != nil {
+	if out, err := f.run(ctx, dir, gitEnv, "git", "clone", "--branch", branch, "--depth", "1", url, repoDir); err != nil {
 		return Result{}, fmt.Errorf("clone %s#%s: %w: %s", repo, branch, err, out)
 	}
 
 	goEnv := append(gitEnv, "GOFLAGS=-mod=mod")
-	if out, err := f.run(ctx, dir, goEnv, "go", "get", module+"@"+safeVersion); err != nil {
+	if out, err := f.run(ctx, repoDir, goEnv, "go", "get", module+"@"+safeVersion); err != nil {
 		return Result{}, fmt.Errorf("go get %s@%s: %w: %s", module, safeVersion, err, out)
 	}
-	if out, err := f.run(ctx, dir, goEnv, "go", "mod", "tidy"); err != nil {
+	if out, err := f.run(ctx, repoDir, goEnv, "go", "mod", "tidy"); err != nil {
 		return Result{}, fmt.Errorf("go mod tidy: %w: %s", err, out)
 	}
 
 	res := Result{Branch: branch, Module: module, PinnedTo: safeVersion}
-	if out, _ := f.run(ctx, dir, gitEnv, "git", "status", "--porcelain"); strings.TrimSpace(out) == "" {
+	if out, _ := f.run(ctx, repoDir, gitEnv, "git", "status", "--porcelain"); strings.TrimSpace(out) == "" {
 		res.NoChange = true
 		return res, nil
 	}
-	res.GoModDiff, _ = f.run(ctx, dir, gitEnv, "git", "diff", "--", "go.mod")
+	res.GoModDiff, _ = f.run(ctx, repoDir, gitEnv, "git", "diff", "--", "go.mod")
 
 	msg := fmt.Sprintf("revert %s to %s (held by Licence to Patch)\n\nThis bump was flagged as an unsafe contract change; pinning it back while the rest of the group can merge.", module, safeVersion)
 	steps := [][]string{
@@ -108,14 +111,14 @@ func (f *Fixer) RevertBump(ctx context.Context, owner, repo, branch, module, saf
 		{"commit", "-m", msg},
 	}
 	for _, args := range steps {
-		if out, err := f.run(ctx, dir, gitEnv, "git", args...); err != nil {
+		if out, err := f.run(ctx, repoDir, gitEnv, "git", args...); err != nil {
 			return res, fmt.Errorf("git %s: %w: %s", args[0], err, out)
 		}
 	}
-	sha, _ := f.run(ctx, dir, gitEnv, "git", "rev-parse", "HEAD")
+	sha, _ := f.run(ctx, repoDir, gitEnv, "git", "rev-parse", "HEAD")
 	res.Commit = strings.TrimSpace(sha)
 
-	if out, err := f.run(ctx, dir, gitEnv, "git", "push", "origin", "HEAD:"+branch); err != nil {
+	if out, err := f.run(ctx, repoDir, gitEnv, "git", "push", "origin", "HEAD:"+branch); err != nil {
 		return res, fmt.Errorf("push: %w: %s", err, out)
 	}
 	res.Pushed = true
