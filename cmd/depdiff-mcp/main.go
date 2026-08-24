@@ -1,9 +1,11 @@
 // Command depdiff-mcp exposes the depdiff detection core as an MCP server over
 // streamable HTTP, so a TrueForge agent can call it as a real tool.
 //
-// Tool: diff_go_dependency(module, from_version, to_version) -> JSON report of
+// Tool: diff_go_dependency(module, from_version, to_version) -> JSON evidence of
 // contract-relevant changes (api-version literal changes, removed exported
-// symbols) that a changelog omits and that mocked tests do not catch.
+// symbols) that a changelog omits and that mocked tests do not catch, plus a
+// preliminary verdict as a hint. It returns facts, not a finished review — the
+// agent reasons over them and writes the recommendation.
 //
 // The tool is annotated read-only so the harness runs it autonomously.
 //
@@ -21,20 +23,22 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/mayankpande88/licence-to-patch/internal/brief"
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
 	"github.com/mayankpande88/licence-to-patch/internal/verdict"
 )
 
-// toolResult is the depdiff report, a deterministic preliminary verdict, and a
-// review-ready markdown explanation (what changed / why it matters / what to do).
-// The verdict is a hint; the agent and the approving human make the final call.
-// Markdown is meant to be dropped verbatim into a PR review so the review
-// explains itself rather than just stamping a verdict.
+// toolResult is the deterministic evidence the tool gives the agent: the raw
+// source-diff facts (changed api-version literals, removed exported symbols,
+// files-changed count) plus a preliminary verdict as a hint.
+//
+// It deliberately does NOT render a review-ready recommendation. Writing the
+// per-repo brief — reasoning about which changes this repo actually reaches,
+// weighing the test result, and recommending options — is the agent's job, not
+// the tool's. Handing the agent finished prose only anchors it to echo. The
+// standalone CLI (tools/depdiff), which has no agent, keeps its own renderer.
 type toolResult struct {
 	depdiff.Report
 	Preliminary verdict.Verdict `json:"preliminary"`
-	Markdown    string          `json:"markdown"`
 }
 
 func main() {
@@ -54,9 +58,9 @@ func main() {
 				"changes that a changelog omits and that a mocked test suite cannot catch: changed "+
 				"REST api-version literals (a runtime contract change), removed exported symbols, and "+
 				"the count of changed .go files. Also returns a deterministic preliminary verdict "+
-				"(ACCEPT/CAUTION/HOLD) and a review-ready `markdown` explanation (what changed / why it "+
-				"matters / what to do) meant to be dropped verbatim into a PR review. Use this to decide "+
-				"whether a dependency bump is safe.",
+				"(ACCEPT/CAUTION/HOLD) as a hint. This is EVIDENCE, not a finished review: reason over "+
+				"these facts yourself — check which changes this repo actually reaches, run the tests, and "+
+				"write the recommendation. Use this to decide whether a dependency bump is safe.",
 		),
 		mcp.WithString("module", mcp.Required(),
 			mcp.Description("Go module path, e.g. github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/monitor/armmonitor")),
@@ -96,7 +100,7 @@ func handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult
 		return mcp.NewToolResultErrorf("diff failed: %v", err), nil
 	}
 	v := verdict.Classify(rep)
-	res := toolResult{Report: rep, Preliminary: v, Markdown: brief.Explain(rep, v)}
+	res := toolResult{Report: rep, Preliminary: v}
 	out, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultErrorf("marshal failed: %v", err), nil
