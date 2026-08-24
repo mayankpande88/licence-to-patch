@@ -1,0 +1,4 @@
+# built binaries
+/depdiff
+bin/
+*.exe
