@@ -21,15 +21,20 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/mayankpande88/licence-to-patch/internal/brief"
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
 	"github.com/mayankpande88/licence-to-patch/internal/verdict"
 )
 
-// toolResult is the depdiff report plus a deterministic preliminary verdict.
+// toolResult is the depdiff report, a deterministic preliminary verdict, and a
+// review-ready markdown explanation (what changed / why it matters / what to do).
 // The verdict is a hint; the agent and the approving human make the final call.
+// Markdown is meant to be dropped verbatim into a PR review so the review
+// explains itself rather than just stamping a verdict.
 type toolResult struct {
 	depdiff.Report
 	Preliminary verdict.Verdict `json:"preliminary"`
+	Markdown    string          `json:"markdown"`
 }
 
 func main() {
@@ -49,7 +54,9 @@ func main() {
 				"changes that a changelog omits and that a mocked test suite cannot catch: changed "+
 				"REST api-version literals (a runtime contract change), removed exported symbols, and "+
 				"the count of changed .go files. Also returns a deterministic preliminary verdict "+
-				"(ACCEPT/CAUTION/HOLD) as a hint. Use this to decide whether a dependency bump is safe.",
+				"(ACCEPT/CAUTION/HOLD) and a review-ready `markdown` explanation (what changed / why it "+
+				"matters / what to do) meant to be dropped verbatim into a PR review. Use this to decide "+
+				"whether a dependency bump is safe.",
 		),
 		mcp.WithString("module", mcp.Required(),
 			mcp.Description("Go module path, e.g. github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/monitor/armmonitor")),
@@ -88,7 +95,8 @@ func handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult
 	if err != nil {
 		return mcp.NewToolResultErrorf("diff failed: %v", err), nil
 	}
-	res := toolResult{Report: rep, Preliminary: verdict.Classify(rep)}
+	v := verdict.Classify(rep)
+	res := toolResult{Report: rep, Preliminary: v, Markdown: brief.Explain(rep, v)}
 	out, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultErrorf("marshal failed: %v", err), nil
