@@ -16,7 +16,13 @@ import (
 	"os"
 
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
+	"github.com/mayankpande88/licence-to-patch/internal/verdict"
 )
+
+type output struct {
+	depdiff.Report
+	Preliminary verdict.Verdict `json:"preliminary"`
+}
 
 func main() {
 	if len(os.Args) != 4 {
@@ -28,6 +34,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "depdiff: %v\n", err)
 		os.Exit(1)
 	}
-	out, _ := json.MarshalIndent(rep, "", "  ")
+	out, _ := json.MarshalIndent(output{Report: rep, Preliminary: verdict.Classify(rep)}, "", "  ")
 	fmt.Println(string(out))
 }
