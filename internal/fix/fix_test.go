@@ -28,8 +28,12 @@ func TestRevertBump_RejectsMalformedInputs(t *testing.T) {
 	}
 }
 
-func TestRedact(t *testing.T) {
-	if got := redact("clone https://x-access-token:SECRET@github.com/o/r.git failed", "SECRET"); strings.Contains(got, "SECRET") {
-		t.Fatalf("token not redacted: %q", got)
+func TestRevertBump_AcceptsIncompatibleVersion(t *testing.T) {
+	// +incompatible is a valid Go module version; it must pass validation and fail
+	// later (on the network clone) rather than being rejected up front.
+	f := New("tok")
+	_, err := f.RevertBump(context.Background(), "o", "r", "b", "example.com/m", "v2.0.0+incompatible")
+	if err != nil && strings.Contains(err.Error(), "invalid version") {
+		t.Fatalf("+incompatible version must not be rejected by validation: %v", err)
 	}
 }

@@ -60,8 +60,9 @@ func main() {
 		"post_pr_review",
 		mcp.WithDescription(
 			"Post a review on a GitHub pull request: leave the trust brief as a comment, or "+
-				"REQUEST_CHANGES to hold a PR that contains an unsafe bump, or APPROVE a clean one. "+
-				"This is an irreversible action on a real PR and pauses for human approval first.",
+				"REQUEST_CHANGES to flag a PR that contains an unsafe bump, or APPROVE a clean one. "+
+				"This is advisory feedback and runs without approval; the human gate is on the "+
+				"code-changing fix (see the fix server), not on posting a review.",
 		),
 		mcp.WithString("owner", mcp.Required(), mcp.Description("Repository owner, e.g. mayankpande88")),
 		mcp.WithString("repo", mcp.Required(), mcp.Description("Repository name, e.g. azmetrics-demo")),

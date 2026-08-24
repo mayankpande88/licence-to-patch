@@ -7,19 +7,26 @@ package fix
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-var nameRe = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+// nameRe validates owner/repo/branch/module path segments; versionRe additionally
+// allows '+' so Go forms like v2.0.0+incompatible and +incompatible pseudo-versions
+// are accepted.
+var (
+	nameRe    = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+	versionRe = regexp.MustCompile(`^[A-Za-z0-9._+/-]+$`)
+)
 
 // Fixer reverts a dependency bump on a branch using a GitHub token.
 type Fixer struct {
-	Token string
-	// Committer identity for the revert commit.
+	Token       string
 	AuthorName  string
 	AuthorEmail string
 }
@@ -49,10 +56,13 @@ func (f *Fixer) RevertBump(ctx context.Context, owner, repo, branch, module, saf
 	if f.Token == "" {
 		return Result{}, fmt.Errorf("no GitHub token configured")
 	}
-	for name, v := range map[string]string{"owner": owner, "repo": repo, "branch": branch, "module": module, "version": safeVersion} {
+	for name, v := range map[string]string{"owner": owner, "repo": repo, "branch": branch, "module": module} {
 		if v == "" || !nameRe.MatchString(v) {
 			return Result{}, fmt.Errorf("invalid %s %q", name, v)
 		}
+	}
+	if safeVersion == "" || !versionRe.MatchString(safeVersion) {
+		return Result{}, fmt.Errorf("invalid version %q", safeVersion)
 	}
 
 	dir, err := os.MkdirTemp("", "lp-fix-*")
@@ -61,64 +71,74 @@ func (f *Fixer) RevertBump(ctx context.Context, owner, repo, branch, module, saf
 	}
 	defer os.RemoveAll(dir)
 
-	cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", f.Token, owner, repo)
-	if out, err := f.run(ctx, dir, "git", "clone", "--branch", branch, "--depth", "1", cloneURL, "."); err != nil {
-		return Result{}, fmt.Errorf("clone %s#%s: %w: %s", repo, branch, err, redact(out, f.Token))
+	// Authenticate via an http.extraheader in a throwaway git config passed through
+	// GIT_CONFIG_GLOBAL — the token lives in a 0600 file and never appears in argv
+	// (unlike embedding it in the clone URL, which leaks via ps / /proc/*/cmdline).
+	gitEnv, cleanup, err := f.authEnv(dir)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanup()
+
+	url := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
+	if out, err := f.run(ctx, dir, gitEnv, "git", "clone", "--branch", branch, "--depth", "1", url, "."); err != nil {
+		return Result{}, fmt.Errorf("clone %s#%s: %w: %s", repo, branch, err, out)
 	}
 
-	// Revert just this module to the safe version and tidy.
-	env := append(os.Environ(), "GOFLAGS=-mod=mod")
-	if out, err := f.runEnv(ctx, dir, env, "go", "get", module+"@"+safeVersion); err != nil {
+	goEnv := append(gitEnv, "GOFLAGS=-mod=mod")
+	if out, err := f.run(ctx, dir, goEnv, "go", "get", module+"@"+safeVersion); err != nil {
 		return Result{}, fmt.Errorf("go get %s@%s: %w: %s", module, safeVersion, err, out)
 	}
-	if out, err := f.runEnv(ctx, dir, env, "go", "mod", "tidy"); err != nil {
+	if out, err := f.run(ctx, dir, goEnv, "go", "mod", "tidy"); err != nil {
 		return Result{}, fmt.Errorf("go mod tidy: %w: %s", err, out)
 	}
 
 	res := Result{Branch: branch, Module: module, PinnedTo: safeVersion}
-
-	// Nothing to commit means the branch already had the safe version.
-	if out, _ := f.run(ctx, dir, "git", "status", "--porcelain"); strings.TrimSpace(out) == "" {
+	if out, _ := f.run(ctx, dir, gitEnv, "git", "status", "--porcelain"); strings.TrimSpace(out) == "" {
 		res.NoChange = true
 		return res, nil
 	}
-	res.GoModDiff, _ = f.run(ctx, dir, "git", "diff", "--", "go.mod")
+	res.GoModDiff, _ = f.run(ctx, dir, gitEnv, "git", "diff", "--", "go.mod")
 
 	msg := fmt.Sprintf("revert %s to %s (held by Licence to Patch)\n\nThis bump was flagged as an unsafe contract change; pinning it back while the rest of the group can merge.", module, safeVersion)
-	for _, args := range [][]string{
+	steps := [][]string{
 		{"config", "user.name", f.AuthorName},
 		{"config", "user.email", f.AuthorEmail},
-		{"commit", "-am", msg},
-	} {
-		if out, err := f.run(ctx, dir, "git", args...); err != nil {
+		{"add", "-A"}, // stage new files too (e.g. a freshly generated go.sum)
+		{"commit", "-m", msg},
+	}
+	for _, args := range steps {
+		if out, err := f.run(ctx, dir, gitEnv, "git", args...); err != nil {
 			return res, fmt.Errorf("git %s: %w: %s", args[0], err, out)
 		}
 	}
-	sha, _ := f.run(ctx, dir, "git", "rev-parse", "HEAD")
+	sha, _ := f.run(ctx, dir, gitEnv, "git", "rev-parse", "HEAD")
 	res.Commit = strings.TrimSpace(sha)
 
-	if out, err := f.run(ctx, dir, "git", "push", "origin", "HEAD:"+branch); err != nil {
-		return res, fmt.Errorf("push: %w: %s", err, redact(out, f.Token))
+	if out, err := f.run(ctx, dir, gitEnv, "git", "push", "origin", "HEAD:"+branch); err != nil {
+		return res, fmt.Errorf("push: %w: %s", err, out)
 	}
 	res.Pushed = true
 	return res, nil
 }
 
-func (f *Fixer) run(ctx context.Context, dir, name string, args ...string) (string, error) {
-	return f.runEnv(ctx, dir, os.Environ(), name, args...)
+// authEnv writes a throwaway git config that adds an Authorization header for
+// github.com, and returns an env slice pointing GIT_CONFIG_GLOBAL at it.
+func (f *Fixer) authEnv(dir string) ([]string, func(), error) {
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + f.Token))
+	cfg := filepath.Join(dir, ".gitconfig")
+	content := fmt.Sprintf("[http \"https://github.com/\"]\n\textraheader = Authorization: Basic %s\n", basic)
+	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
+		return nil, func() {}, err
+	}
+	env := append(os.Environ(), "GIT_CONFIG_GLOBAL="+cfg, "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0")
+	return env, func() { os.Remove(cfg) }, nil
 }
 
-func (f *Fixer) runEnv(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
+func (f *Fixer) run(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	return string(out), err
-}
-
-func redact(s, token string) string {
-	if token == "" {
-		return s
-	}
-	return strings.ReplaceAll(s, token, "***")
 }
