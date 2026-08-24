@@ -61,6 +61,19 @@ func TestPostReview_RequiresToken(t *testing.T) {
 	}
 }
 
+func TestPostReview_RejectsMalformedOwnerRepo(t *testing.T) {
+	c := New("tok")
+	for _, tc := range []struct{ owner, repo string }{
+		{"own/../etc", "repo"},
+		{"owner", "repo/pulls/9/reviews"},
+		{"has space", "repo"},
+	} {
+		if _, err := c.PostReview(context.Background(), tc.owner, tc.repo, 1, Comment, "x"); err == nil {
+			t.Errorf("expected rejection for owner=%q repo=%q", tc.owner, tc.repo)
+		}
+	}
+}
+
 func TestPostReview_SurfacesAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)

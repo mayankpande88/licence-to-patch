@@ -11,17 +11,26 @@ import (
 	"github.com/mayankpande88/licence-to-patch/internal/verdict"
 )
 
-// Explain returns a markdown section for one dependency bump.
+// Explain returns a markdown section for one dependency bump. A single bump can
+// carry more than one kind of contract change, so every applicable section is
+// rendered — not just the first.
 func Explain(rep depdiff.Report, v verdict.Verdict) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "### %s %s — `%s` %s → %s\n\n", icon(v.Level), v.Level, rep.Module, rep.FromVersion, rep.ToVersion)
 
-	switch {
-	case len(rep.APIVersionChanges) > 0:
+	wrote := false
+	if len(rep.APIVersionChanges) > 0 {
 		writeAPIVersion(&b, rep)
-	case len(rep.RemovedSymbols) > 0:
+		wrote = true
+	}
+	if len(rep.RemovedSymbols) > 0 {
+		if wrote {
+			b.WriteString("\n")
+		}
 		writeRemovedSymbols(&b, rep)
-	default:
+		wrote = true
+	}
+	if !wrote {
 		writeClean(&b, rep)
 	}
 	return b.String()

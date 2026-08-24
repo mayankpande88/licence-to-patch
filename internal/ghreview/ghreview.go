@@ -13,8 +13,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"time"
 )
+
+// GitHub owner and repo names allow only these characters; validating up front
+// keeps a malformed value (e.g. one containing a slash) from rewriting the URL
+// path to an unintended endpoint.
+var nameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // Event is a GitHub pull-request review event.
 type Event string
@@ -62,6 +68,15 @@ type Result struct {
 func (c *Client) PostReview(ctx context.Context, owner, repo string, number int, event Event, body string) (Result, error) {
 	if c.Token == "" {
 		return Result{}, fmt.Errorf("no GitHub token configured")
+	}
+	if !nameRe.MatchString(owner) {
+		return Result{}, fmt.Errorf("invalid owner %q", owner)
+	}
+	if !nameRe.MatchString(repo) {
+		return Result{}, fmt.Errorf("invalid repo %q", repo)
+	}
+	if number <= 0 {
+		return Result{}, fmt.Errorf("invalid pull number %d", number)
 	}
 	if !event.Valid() {
 		return Result{}, fmt.Errorf("invalid review event %q", event)
