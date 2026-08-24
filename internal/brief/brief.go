@@ -41,7 +41,7 @@ func writeAPIVersion(b *strings.Builder, rep depdiff.Report) {
 	for _, c := range rep.APIVersionChanges {
 		fmt.Fprintf(b, "- `%s`: `%s` → `%s`\n", c.File, c.From, c.To)
 	}
-	b.WriteString("\n**Why it matters:** this is a *runtime contract change*, not a code change. Your project still compiles and unit tests still pass — the api-version is a constant inside the dependency, and mocked tests never send it to the real service. But at runtime the client will call the API with the new version; if the target service or resource does not support it, the call fails (for Azure ARM, a `404 InvalidResourceType`) — often silently. The changelog typically does **not** mention this; only a source diff between the two versions reveals it.\n\n")
+	b.WriteString("\n**Why it matters:** this is a *runtime contract change*, not a code change. Your project still compiles and unit tests still pass — the api-version is a constant inside the dependency, and mocked tests never send it to the real service. But at runtime the client calls the API with the new version; if the target service or resource does not support it, the request fails (commonly a `4xx`, e.g. `404`) — often silently. The changelog typically does **not** mention this; only a source diff between the two versions reveals it.\n\n")
 	b.WriteString("**Recommendation:** hold this bump out of the group and verify it against a live or staging environment before merging.\n")
 }
 
