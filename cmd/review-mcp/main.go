@@ -1,0 +1,105 @@
+// Command review-mcp exposes the gated "post a PR review" action as an MCP
+// server over streamable HTTP.
+//
+// The single tool, post_pr_review, is annotated DESTRUCTIVE so the TrueForge
+// harness pauses for human approval before it runs — the agent may assemble the
+// trust brief on its own, but a person signs off before anything lands on the PR.
+//
+// The GitHub token is read from GITHUB_TOKEN and stays in this process; it never
+// reaches the model or the sandbox.
+//
+// Usage:
+//
+//	GITHUB_TOKEN=... review-mcp [-addr :8972]
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"log"
+	"os"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/mayankpande88/licence-to-patch/internal/ghreview"
+)
+
+func main() {
+	addr := flag.String("addr", ":8972", "listen address for the streamable-HTTP MCP server")
+	flag.Parse()
+
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		log.Fatal("GITHUB_TOKEN is required")
+	}
+	client := ghreview.New(token)
+
+	s := server.NewMCPServer(
+		"licence-to-patch-review",
+		"0.1.0",
+		server.WithToolCapabilities(true),
+	)
+
+	tool := mcp.NewTool(
+		"post_pr_review",
+		mcp.WithDescription(
+			"Post a review on a GitHub pull request: leave the trust brief as a comment, or "+
+				"REQUEST_CHANGES to hold a PR that contains an unsafe bump, or APPROVE a clean one. "+
+				"This is an irreversible action on a real PR and pauses for human approval first.",
+		),
+		mcp.WithString("owner", mcp.Required(), mcp.Description("Repository owner, e.g. mayankpande88")),
+		mcp.WithString("repo", mcp.Required(), mcp.Description("Repository name, e.g. azmetrics-demo")),
+		mcp.WithNumber("pull_number", mcp.Required(), mcp.Description("Pull request number")),
+		mcp.WithString("event", mcp.Required(),
+			mcp.Description("One of COMMENT, REQUEST_CHANGES, APPROVE"),
+			mcp.Enum("COMMENT", "REQUEST_CHANGES", "APPROVE")),
+		mcp.WithString("body", mcp.Required(), mcp.Description("Markdown body of the review (the trust brief)")),
+		// Destructive: the harness gates this behind human approval.
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint:    mcp.ToBoolPtr(false),
+			DestructiveHint: mcp.ToBoolPtr(true),
+		}),
+	)
+
+	s.AddTool(tool, handler(client))
+
+	log.Printf("review MCP server (streamable HTTP) listening on %s (endpoint /mcp)", *addr)
+	httpServer := server.NewStreamableHTTPServer(s)
+	if err := httpServer.Start(*addr); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
+}
+
+func handler(client *ghreview.Client) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		owner, err := req.RequireString("owner")
+		if err != nil {
+			return mcp.NewToolResultError("owner is required"), nil
+		}
+		repo, err := req.RequireString("repo")
+		if err != nil {
+			return mcp.NewToolResultError("repo is required"), nil
+		}
+		number, err := req.RequireInt("pull_number")
+		if err != nil {
+			return mcp.NewToolResultError("pull_number is required"), nil
+		}
+		event, err := req.RequireString("event")
+		if err != nil {
+			return mcp.NewToolResultError("event is required"), nil
+		}
+		body, err := req.RequireString("body")
+		if err != nil {
+			return mcp.NewToolResultError("body is required"), nil
+		}
+
+		res, err := client.PostReview(ctx, owner, repo, number, ghreview.Event(event), body)
+		if err != nil {
+			return mcp.NewToolResultErrorf("post review failed: %v", err), nil
+		}
+		out, _ := json.MarshalIndent(res, "", "  ")
+		return mcp.NewToolResultText(string(out)), nil
+	}
+}
