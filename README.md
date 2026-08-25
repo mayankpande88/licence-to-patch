@@ -8,6 +8,12 @@ Dependabot and Renovate open a flood of update PRs, and grouped PRs bundle sever
 
 > Licence to patch — but only with your signature.
 
+## See it in action
+
+One bare prompt — `Review PR #N` — and the agent reads the PR, fans out a sub-agent per bump, diffs each dependency's source, checks reachability against the repo, posts a trust brief, and pauses for your approval before touching code:
+
+![Licence to Patch — end-to-end: input PR → agent + sub-agents → approval gate → HOLD brief posted back on the PR](docs/e2e-demo.gif)
+
 ## The wedge: "green CI ≠ safe"
 
 The flagship detector diffs a dependency's **source** between the current and target versions and surfaces contract changes the changelog omits. The motivating case is real: `armmonitor` (Azure SDK for Go) v0.12.0 → v0.13.0 silently changed the Azure Monitor metric-alert REST api-version from `2024-03-01-preview` to `2026-01-01`, which ARM rejects at runtime — invisible to the compiler, a mocked test suite, reachability scanners, and the changelog alike. Only a source diff between the two versions reveals it.
