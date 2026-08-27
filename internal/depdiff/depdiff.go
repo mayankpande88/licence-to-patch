@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/mayankpande88/licence-to-patch/internal/apidiff"
 )
 
 // APIVersionChange is a REST api-version literal that a module file changed
@@ -25,12 +27,13 @@ type APIVersionChange struct {
 
 // Report is the structured result of diffing two module versions.
 type Report struct {
-	Module            string             `json:"module"`
-	FromVersion       string             `json:"from_version"`
-	ToVersion         string             `json:"to_version"`
-	APIVersionChanges []APIVersionChange `json:"api_version_changes"`
-	RemovedSymbols    []string           `json:"removed_exported_symbols"`
-	FilesChanged      int                `json:"files_changed"`
+	Module            string                `json:"module"`
+	FromVersion       string                `json:"from_version"`
+	ToVersion         string                `json:"to_version"`
+	APIVersionChanges []APIVersionChange    `json:"api_version_changes"`
+	ChangedConstants  []apidiff.ConstChange `json:"changed_constants"`
+	RemovedSymbols    []string              `json:"removed_exported_symbols"`
+	FilesChanged      int                   `json:"files_changed"`
 }
 
 // Diff downloads module@from and module@to and reports their contract diffs.
@@ -48,11 +51,15 @@ func Diff(module, from, to string) (Report, error) {
 		FromVersion:       from,
 		ToVersion:         to,
 		APIVersionChanges: diffAPIVersions(fromDir, toDir),
+		ChangedConstants:  dropVersionStamps(apidiff.Changed(fromDir, toDir), from, to),
 		RemovedSymbols:    removedExportedSymbols(fromDir, toDir),
 		FilesChanged:      countChangedFiles(fromDir, toDir),
 	}
 	if rep.APIVersionChanges == nil {
 		rep.APIVersionChanges = []APIVersionChange{}
+	}
+	if rep.ChangedConstants == nil {
+		rep.ChangedConstants = []apidiff.ConstChange{}
 	}
 	if rep.RemovedSymbols == nil {
 		rep.RemovedSymbols = []string{}
@@ -117,6 +124,24 @@ func apiVersionByFile(dir string) map[string]string {
 		}
 	}
 	return result
+}
+
+// dropVersionStamps removes the module's own self-version constant (e.g.
+// moduleVersion "v0.12.0" -> "v0.13.0") from the changed-constant list. That
+// bump is not a contract change — every release changes it — and reporting it
+// is pure noise. A constant is a self-stamp when its value goes from the
+// module's own from-version to its to-version (ignoring a leading "v").
+func dropVersionStamps(changes []apidiff.ConstChange, from, to string) []apidiff.ConstChange {
+	trim := func(s string) string { return strings.TrimPrefix(s, "v") }
+	f, t := trim(from), trim(to)
+	kept := changes[:0]
+	for _, c := range changes {
+		if trim(c.From) == f && trim(c.To) == t {
+			continue
+		}
+		kept = append(kept, c)
+	}
+	return kept
 }
 
 func diffAPIVersions(fromDir, toDir string) []APIVersionChange {
