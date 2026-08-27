@@ -126,17 +126,29 @@ func apiVersionByFile(dir string) map[string]string {
 	return result
 }
 
+// versionStampName matches identifiers that name a module/SDK self-version
+// stamp (Version, moduleVersion, sdkVersion, pkgVersion, semVer, …). Requiring a
+// name match — not just a value that happens to equal the release pair — keeps
+// an unrelated contract constant (e.g. ProtocolVersion) that changes alongside a
+// release from being silently dropped.
+var versionStampName = regexp.MustCompile(`(?i)(^|_)(module|sdk|pkg|lib|semantic)?_?(version|semver)$`)
+
 // dropVersionStamps removes the module's own self-version constant (e.g.
 // moduleVersion "v0.12.0" -> "v0.13.0") from the changed-constant list. That
 // bump is not a contract change — every release changes it — and reporting it
-// is pure noise. A constant is a self-stamp when its value goes from the
-// module's own from-version to its to-version (ignoring a leading "v").
+// is pure noise. A constant is treated as a self-stamp only when BOTH its value
+// goes from the module's own from-version to its to-version (ignoring a leading
+// "v") AND its identifier reads like a version stamp.
 func dropVersionStamps(changes []apidiff.ConstChange, from, to string) []apidiff.ConstChange {
 	trim := func(s string) string { return strings.TrimPrefix(s, "v") }
 	f, t := trim(from), trim(to)
 	kept := changes[:0]
 	for _, c := range changes {
-		if trim(c.From) == f && trim(c.To) == t {
+		ident := c.Name
+		if i := strings.LastIndex(ident, "."); i >= 0 {
+			ident = ident[i+1:]
+		}
+		if trim(c.From) == f && trim(c.To) == t && versionStampName.MatchString(ident) {
 			continue
 		}
 		kept = append(kept, c)

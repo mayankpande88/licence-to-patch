@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mayankpande88/licence-to-patch/internal/apidiff"
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
 )
 
@@ -68,10 +69,57 @@ func Classify(rep depdiff.Report) Verdict {
 			len(rep.RemovedSymbols), preview(rep.RemovedSymbols)))
 	}
 
+	// A baked-in constant whose value changed is a runtime behavioral change:
+	// it compiles and passes mocked tests, yet shifts what the code does. An
+	// api-version-shaped change is the dangerous, service-rejected class (Hold);
+	// any other changed exported constant is worth a look (at least Caution).
+	if cc := ContractConstants(rep); len(cc) > 0 {
+		apiVer := false
+		for _, c := range cc {
+			if c.Kind == "api-version" {
+				apiVer = true
+				break
+			}
+		}
+		if apiVer {
+			v.Level = Hold
+		} else if v.Level == Accept {
+			v.Level = Caution
+		}
+		ex := cc[0]
+		v.Reasons = append(v.Reasons, fmt.Sprintf(
+			"%d changed constant value(s), e.g. %s: %q → %q — a baked-in value the bump silently changed; compiles and passes mocked tests but can shift runtime behavior",
+			len(cc), ex.Name, ex.From, ex.To))
+	}
+
 	if len(v.Reasons) == 0 {
-		v.Reasons = append(v.Reasons, "no api-version change and no removed exported symbols in the diff")
+		v.Reasons = append(v.Reasons, "no api-version change, no removed exported symbols, and no changed contract constants in the diff")
 	}
 	return v
+}
+
+// ContractConstants returns the changed constants that should influence the
+// review, shared by the verdict and the brief so both agree. It drops:
+//   - api-version constants already surfaced by the api-version detector (same
+//     from→to), to avoid double-reporting the same change, and
+//   - unexported, non-api-version constants, which are internal implementation
+//     detail and too noisy to flag (they stay in the JSON report as evidence).
+func ContractConstants(rep depdiff.Report) []apidiff.ConstChange {
+	seen := map[string]bool{}
+	for _, a := range rep.APIVersionChanges {
+		seen[a.From+"\x00"+a.To] = true
+	}
+	var out []apidiff.ConstChange
+	for _, c := range rep.ChangedConstants {
+		if c.Kind == "api-version" && seen[c.From+"\x00"+c.To] {
+			continue
+		}
+		if c.Kind != "api-version" && !c.Exported {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func preview(names []string) string {

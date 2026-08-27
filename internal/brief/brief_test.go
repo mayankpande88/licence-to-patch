@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mayankpande88/licence-to-patch/internal/apidiff"
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
 	"github.com/mayankpande88/licence-to-patch/internal/verdict"
 )
@@ -51,5 +52,23 @@ func TestCode_Truncates(t *testing.T) {
 	got := code([]string{"A", "B", "C", "D", "E", "F"})
 	if !strings.Contains(got, "…") || !strings.Contains(got, "`A`") {
 		t.Fatalf("unexpected code(): %q", got)
+	}
+}
+
+// TestExplain_ChangedConstants (Qodo #1): a changed contract constant renders a
+// dedicated what/why/recommendation section instead of being omitted.
+func TestExplain_ChangedConstants(t *testing.T) {
+	rep := depdiff.Report{
+		Module: "example.com/x", FromVersion: "v1.0.0", ToVersion: "v1.1.0",
+		ChangedConstants: []apidiff.ConstChange{
+			{Name: "DefaultTimeout", File: "client.go", From: "30", To: "60", Kind: "constant", Exported: true},
+		},
+	}
+	v := verdict.Classify(rep)
+	out := Explain(rep, v)
+	for _, want := range []string{"DefaultTimeout", "`30` → `60`", "runtime behavioral change", "Recommendation:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief missing %q\n%s", want, out)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mayankpande88/licence-to-patch/internal/apidiff"
 	"github.com/mayankpande88/licence-to-patch/internal/depdiff"
 	"github.com/mayankpande88/licence-to-patch/internal/verdict"
 )
@@ -30,6 +31,13 @@ func Explain(rep depdiff.Report, v verdict.Verdict) string {
 		writeRemovedSymbols(&b, rep)
 		wrote = true
 	}
+	if cc := verdict.ContractConstants(rep); len(cc) > 0 {
+		if wrote {
+			b.WriteString("\n")
+		}
+		writeChangedConstants(&b, cc)
+		wrote = true
+	}
 	if !wrote {
 		writeClean(&b, rep)
 	}
@@ -51,8 +59,22 @@ func writeRemovedSymbols(b *strings.Builder, rep depdiff.Report) {
 	b.WriteString("**Recommendation:** update the affected call sites to the new API, or pin the current version until you can.\n")
 }
 
+func writeChangedConstants(b *strings.Builder, cc []apidiff.ConstChange) {
+	b.WriteString("**What changed:** the value of a baked-in constant this module declares changed — a value inside the dependency, not in your code:\n")
+	const max = 8
+	for i, c := range cc {
+		if i == max {
+			fmt.Fprintf(b, "- …and %d more\n", len(cc)-max)
+			break
+		}
+		fmt.Fprintf(b, "- `%s` (`%s`): `%s` → `%s`\n", c.Name, c.File, c.From, c.To)
+	}
+	b.WriteString("\n**Why it matters:** a changed constant value — a default timeout, an endpoint, a retry count, an enum, an api-version — is a *runtime behavioral change*, not a code change. Your project still compiles and unit tests still pass, but the bumped code now does something different at runtime. The changelog often does **not** mention it; only a source diff between the two versions reveals it.\n\n")
+	b.WriteString("**Recommendation:** confirm the changed value is compatible with how this repo uses the module before merging; if it drives behavior you depend on, verify against a live or staging environment.\n")
+}
+
 func writeClean(b *strings.Builder, rep depdiff.Report) {
-	fmt.Fprintf(b, "**What changed:** %d file(s) changed, with no REST api-version literals altered and no exported symbols removed.\n\n", rep.FilesChanged)
+	fmt.Fprintf(b, "**What changed:** %d file(s) changed, with no REST api-version literals altered, no exported symbols removed, and no baked-in constant values changed.\n\n", rep.FilesChanged)
 	b.WriteString("**Why it's safe:** nothing in the diff can break a caller at compile time or silently at runtime. This is a routine update.\n")
 }
 
