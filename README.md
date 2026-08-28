@@ -10,20 +10,24 @@ Dependabot and Renovate open a flood of update PRs, and grouped PRs bundle sever
 
 ## See it in action
 
-One bare prompt — `Review PR #N` — and the agent reads the PR, fans out a sub-agent per bump, diffs each dependency's source, checks reachability against the repo, posts a trust brief, and pauses for your approval before touching code:
+One bare prompt — `Review PR #N` — and the agent reads the PR, fans out a sub-agent per bump, diffs each dependency's source, searches the repo for where the changed symbols are actually used, posts a trust brief, and pauses for your approval before touching code:
 
 ![Licence to Patch — end-to-end: input PR → agent + sub-agents → approval gate → HOLD brief posted back on the PR](docs/e2e-demo.gif)
 
 ## The wedge: "green CI ≠ safe"
 
-The flagship detector diffs a dependency's **source** between the current and target versions and surfaces contract changes the changelog omits. The motivating case is real: `armmonitor` (Azure SDK for Go) v0.12.0 → v0.13.0 silently changed the Azure Monitor metric-alert REST api-version from `2024-03-01-preview` to `2026-01-01`, which ARM rejects at runtime — invisible to the compiler, a mocked test suite, reachability scanners, and the changelog alike. Only a source diff between the two versions reveals it.
+The method is **diff the source, not the changelog.** Between the current and target versions the detector surfaces contract-relevant changes a changelog omits — a changed baked-in constant *value* (a default timeout, an endpoint, a retry count, an enum, a REST api-version) or a removed exported function.
+
+The motivating case is real: `armmonitor` (Azure SDK for Go) v0.12.0 → v0.13.0 silently changed a metric-alert REST api-version from `2024-03-01-preview` to `2026-01-01`, which ARM rejects at runtime — invisible to the compiler, a mocked test suite, reachability scanners, and the changelog alike.
+
+That api-version detector is **one heuristic**, and a deliberately narrow, high-precision one (it keys off Azure's `Set("api-version", …)` idiom). The general layer is the **agent**: it diffs the source, reads the changelog, searches for call sites, verifies in a sandbox, and asks a human before it changes code — and it applies that across ecosystems, proven on **Go, Python, and npm**. The deterministic tools are grounding; the judgment is the agent's.
 
 ## What it does
 
 Given a grouped Dependabot PR, the agent:
 
 1. **Reads the PR** (GitHub MCP) and lists every bump.
-2. **Analyses each bump.** For Go it runs `depdiff` (source diff → changed api-version literals, removed exported symbols). For other ecosystems it does the equivalent in the sandbox.
+2. **Analyses each bump.** For Go it runs `depdiff` (source diff → changed constant values, an api-version heuristic, removed exported functions). For other ecosystems it does the equivalent in the sandbox.
 3. **Verifies in the sandbox** that the bumped code still builds and its tests pass — proving CI *would* be green, live.
 4. **Posts a per-bump trust brief** as a PR comment — ACCEPT / CAUTION / HOLD, each with *what changed / why it matters / recommendation*. This is advisory, so it posts without stopping.
 5. **Fixes the unsafe bump — behind a human gate.** For a HOLD it proposes a concrete fix; the harness pauses for your Allow/Deny before it changes anything, then either drives Dependabot to rebuild the group without the module, or reverts the bump on the branch directly.
@@ -39,9 +43,9 @@ The approval gate is on the **fix**, not the comment: posting a review is advice
  github (MCP)  depdiff(MCP) sandbox    review (MCP)    fix (MCP)             verdict (hint)
  read the PR   diff a Go    go build   post the trust  revert_bump_on_pr     deterministic
  & its bumps   dep's source + go test  brief comment   (edit branch) OR      ACCEPT/CAUTION/
-               → evidence   reach-     (ADVISORY —     hold_via_dependabot   HOLD as a hint;
-               (facts +     ability +  ungated)        (@dependabot ...)     the AGENT reasons
-               hint)        green CI)                                        & writes the brief
+               → evidence   (green CI  (ADVISORY —     hold_via_dependabot   HOLD as a hint;
+               (facts +     live)      ungated)        (@dependabot ...)     the AGENT reasons
+               hint)                                                         & writes the brief
                                                        → GATED (human
                                                          approves the fix)
 ```
@@ -63,7 +67,7 @@ The gate belongs on the code-changing fix, not on posting a comment. The right l
 
 ## Components
 
-- `cmd/depdiff-mcp` — MCP server: `diff_go_dependency(module, from, to)`. Downloads both versions, diffs the source, and returns **evidence**: the changed api-version literals, removed exported symbols, files-changed count, and a *preliminary* verdict as a hint. It deliberately does **not** return a finished recommendation — reasoning about which changes this repo actually reaches, weighing the tests, and writing the brief is the agent's job. Read-only.
+- `cmd/depdiff-mcp` — MCP server: `diff_go_dependency(module, from, to)`. Downloads both versions, diffs the source, and returns **evidence**: changed constant values (AST-level, any baked-in value), an api-version heuristic, removed exported functions, files-changed count, and a *preliminary* verdict as a hint. It deliberately does **not** return a finished recommendation — reasoning about which changes this repo actually uses, weighing the tests, and writing the brief is the agent's job. Read-only.
 - `cmd/review-mcp` — MCP server: `post_pr_review(owner, repo, pull_number, event, body)`. Advisory (ungated via the agent's policy).
 - `cmd/fix-mcp` — MCP server, the gated code-changing actions: `revert_bump_on_pr` (clone the PR branch, pin the module back, `go mod tidy`, commit, push) and `hold_via_dependabot` (comment `@dependabot ignore <module>` + `@dependabot recreate`).
 - `internal/depdiff` · `internal/verdict` · `internal/brief` — detection core, ACCEPT/CAUTION/HOLD classifier, and the *what/why/recommendation* renderer. The renderer is used only by the standalone `tools/depdiff` CLI (a human runs it directly); in the agent path the agent writes the brief itself from the tool's evidence.
@@ -74,7 +78,7 @@ Every write server binds to loopback, reads its token from `GITHUB_TOKEN` (never
 
 ## Multi-language
 
-The deterministic `depdiff` tool targets Go, where the flagship api-version detector lives. The *technique* — "diff the source, not the changelog" — is language-agnostic, and the agent applies it in the sandbox to any ecosystem. Two full demos plus a live proof:
+The deterministic `depdiff` tool targets Go, where the source-diff detector lives (changed constant values, an api-version heuristic, removed exported functions). The *technique* — "diff the source, not the changelog" — is language-agnostic, and the agent applies it in the sandbox to any ecosystem. Two full demos plus a live proof:
 
 - **Go** — [`azmetrics-demo`](https://github.com/mayankpande88/azmetrics-demo): `armmonitor` 0.12 → 0.13 flips a baked-in api-version ARM rejects. Analysed by the `depdiff` tool.
 - **Python** — [`pyconfig-demo`](https://github.com/mayankpande88/pyconfig-demo): `PyYAML` 5.3 → 6.0 makes `yaml.load`'s `Loader` argument required, so `load_config` raises `TypeError` at runtime while the tests (which cover a different function) stay green. Analysed by the agent in the sandbox.

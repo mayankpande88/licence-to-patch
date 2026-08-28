@@ -28,8 +28,8 @@ import (
 )
 
 // toolResult is the deterministic evidence the tool gives the agent: the raw
-// source-diff facts (changed api-version literals, removed exported symbols,
-// files-changed count) plus a preliminary verdict as a hint.
+// source-diff facts (changed constant values, an api-version heuristic, removed
+// exported functions, files-changed count) plus a preliminary verdict as a hint.
 //
 // It deliberately does NOT render a review-ready recommendation. Writing the
 // per-repo brief — reasoning about which changes this repo actually reaches,
@@ -45,11 +45,13 @@ func main() {
 	addr := flag.String("addr", ":8971", "listen address for the streamable-HTTP MCP server")
 	flag.Parse()
 
-	// 0.2.0: the tool result dropped the `markdown` field (now returns evidence
-	// only). Bumped per semver so the contract change is visible to clients.
+	// 0.3.0: renamed the result field removed_exported_symbols ->
+	// removed_exported_functions (it only ever held functions) and added
+	// changed_constants (AST const-value diff). 0.2.0 had dropped `markdown`.
+	// Bumped per semver so the contract change is visible to clients.
 	s := server.NewMCPServer(
 		"licence-to-patch-depdiff",
-		"0.2.0",
+		"0.3.0",
 		server.WithToolCapabilities(true),
 	)
 
@@ -58,11 +60,13 @@ func main() {
 		mcp.WithDescription(
 			"Diff the SOURCE of a Go module between two versions and report contract-relevant "+
 				"changes that a changelog omits and that a mocked test suite cannot catch: changed "+
-				"REST api-version literals (a runtime contract change), removed exported symbols, and "+
-				"the count of changed .go files. Also returns a deterministic preliminary verdict "+
+				"package-level constant VALUES (any baked-in value — a timeout, endpoint, retry count, "+
+				"enum, or REST api-version), removed exported functions, and the count of changed .go "+
+				"files. (The api-version signal is a narrow, high-precision heuristic; the constant-value "+
+				"diff is the general one.) Also returns a deterministic preliminary verdict "+
 				"(ACCEPT/CAUTION/HOLD) as a hint. This is EVIDENCE, not a finished review: reason over "+
-				"these facts yourself — check which changes this repo actually reaches, run the tests, and "+
-				"write the recommendation. Use this to decide whether a dependency bump is safe.",
+				"these facts yourself — search for where this repo uses the changed symbols, run the "+
+				"tests, and write the recommendation. Use this to decide whether a dependency bump is safe.",
 		),
 		mcp.WithString("module", mcp.Required(),
 			mcp.Description("Go module path, e.g. github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/monitor/armmonitor")),
