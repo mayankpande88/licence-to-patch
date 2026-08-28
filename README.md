@@ -8,6 +8,12 @@ Dependabot and Renovate open a flood of update PRs, and grouped PRs bundle sever
 
 > Licence to patch — but only with your signature.
 
+## The story
+
+A routine Dependabot bump — an Azure SDK for Go update — quietly broke a production service of mine, and it took weeks to find. There was no error anyone could see: CI was green, every test passed, the PR looked completely safe. But the SDK had silently changed the REST `api-version` it sends (`2024-03-01-preview` → `2026-01-01`), and the live service began rejecting the calls at runtime. Nothing in *my* code had changed, and it wasn't in the changelog — the only place the change existed was the dependency's **source**, between two versions.
+
+That repo gets a pile of grouped Dependabot PRs every week, each bundling several bumps. After the outage the instinct was to stop merging them — but you can't stop taking security and patch updates, and no one can hand-verify every bump in every group. What was missing was a confident, non-manual way to tell which bump is safe and which is a silent landmine. That's the job I wanted to hand to an agent. This is it.
+
 ## See it in action
 
 One bare prompt — `Review PR #N` — and the agent reads the PR, fans out a sub-agent per bump, diffs each dependency's source, searches the repo for where the changed symbols are actually used, posts a trust brief, and pauses for your approval before touching code:
