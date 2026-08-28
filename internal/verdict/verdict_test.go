@@ -28,8 +28,8 @@ func TestClassify_ContractChangeIsHold(t *testing.T) {
 
 func TestClassify_RemovedSymbolIsCaution(t *testing.T) {
 	rep := depdiff.Report{
-		Module:         "example.com/x",
-		RemovedSymbols: []string{"OldClient", "LegacyDo"},
+		Module:           "example.com/x",
+		RemovedFunctions: []string{"OldClient", "LegacyDo"},
 	}
 	v := Classify(rep)
 	if v.Level != Caution {
@@ -40,7 +40,7 @@ func TestClassify_RemovedSymbolIsCaution(t *testing.T) {
 func TestClassify_ContractChangeOutranksRemovedSymbol(t *testing.T) {
 	rep := depdiff.Report{
 		APIVersionChanges: []depdiff.APIVersionChange{{File: "c.go", From: "2021-01-01", To: "2026-01-01"}},
-		RemovedSymbols:    []string{"OldClient"},
+		RemovedFunctions:  []string{"OldClient"},
 	}
 	if got := Classify(rep).Level; got != Hold {
 		t.Fatalf("contract change must outrank removed symbol; got %s", got)

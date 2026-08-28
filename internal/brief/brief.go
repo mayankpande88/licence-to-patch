@@ -24,11 +24,11 @@ func Explain(rep depdiff.Report, v verdict.Verdict) string {
 		writeAPIVersion(&b, rep)
 		wrote = true
 	}
-	if len(rep.RemovedSymbols) > 0 {
+	if len(rep.RemovedFunctions) > 0 {
 		if wrote {
 			b.WriteString("\n")
 		}
-		writeRemovedSymbols(&b, rep)
+		writeRemovedFunctions(&b, rep)
 		wrote = true
 	}
 	if cc := verdict.ContractConstants(rep); len(cc) > 0 {
@@ -53,8 +53,8 @@ func writeAPIVersion(b *strings.Builder, rep depdiff.Report) {
 	b.WriteString("**Recommendation:** hold this bump out of the group and verify it against a live or staging environment before merging.\n")
 }
 
-func writeRemovedSymbols(b *strings.Builder, rep depdiff.Report) {
-	fmt.Fprintf(b, "**What changed:** the new version removes %d exported symbol(s): %s.\n\n", len(rep.RemovedSymbols), code(rep.RemovedSymbols))
+func writeRemovedFunctions(b *strings.Builder, rep depdiff.Report) {
+	fmt.Fprintf(b, "**What changed:** the new version removes %d exported function(s): %s.\n\n", len(rep.RemovedFunctions), code(rep.RemovedFunctions))
 	b.WriteString("**Why it matters:** any call site that uses a removed symbol will fail to compile. CI will catch this, but the bump cannot merge without code changes.\n\n")
 	b.WriteString("**Recommendation:** update the affected call sites to the new API, or pin the current version until you can.\n")
 }
@@ -74,7 +74,7 @@ func writeChangedConstants(b *strings.Builder, cc []apidiff.ConstChange) {
 }
 
 func writeClean(b *strings.Builder, rep depdiff.Report) {
-	fmt.Fprintf(b, "**What changed:** %d file(s) changed, with no REST api-version literals altered, no exported symbols removed, and no baked-in constant values changed.\n\n", rep.FilesChanged)
+	fmt.Fprintf(b, "**What changed:** %d file(s) changed, with no REST api-version literals altered, no exported functions removed, and no baked-in constant values changed.\n\n", rep.FilesChanged)
 	b.WriteString("**Why it's safe:** nothing in the diff can break a caller at compile time or silently at runtime. This is a routine update.\n")
 }
 

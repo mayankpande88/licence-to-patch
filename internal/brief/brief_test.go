@@ -29,8 +29,8 @@ func TestExplain_APIVersionChange(t *testing.T) {
 	}
 }
 
-func TestExplain_RemovedSymbols(t *testing.T) {
-	rep := depdiff.Report{Module: "example.com/x", RemovedSymbols: []string{"OldClient", "LegacyDo"}}
+func TestExplain_RemovedFunctions(t *testing.T) {
+	rep := depdiff.Report{Module: "example.com/x", RemovedFunctions: []string{"OldClient", "LegacyDo"}}
 	md := Explain(rep, verdict.Classify(rep))
 	if !strings.Contains(md, "⚠️") || !strings.Contains(md, "CAUTION") || !strings.Contains(md, "OldClient") {
 		t.Errorf("unexpected removed-symbols explanation:\n%s", md)

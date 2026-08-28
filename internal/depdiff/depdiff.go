@@ -32,7 +32,7 @@ type Report struct {
 	ToVersion         string                `json:"to_version"`
 	APIVersionChanges []APIVersionChange    `json:"api_version_changes"`
 	ChangedConstants  []apidiff.ConstChange `json:"changed_constants"`
-	RemovedSymbols    []string              `json:"removed_exported_symbols"`
+	RemovedFunctions  []string              `json:"removed_exported_functions"`
 	FilesChanged      int                   `json:"files_changed"`
 }
 
@@ -52,7 +52,7 @@ func Diff(module, from, to string) (Report, error) {
 		ToVersion:         to,
 		APIVersionChanges: diffAPIVersions(fromDir, toDir),
 		ChangedConstants:  dropVersionStamps(apidiff.Changed(fromDir, toDir), from, to),
-		RemovedSymbols:    removedExportedSymbols(fromDir, toDir),
+		RemovedFunctions:  removedExportedFunctions(fromDir, toDir),
 		FilesChanged:      countChangedFiles(fromDir, toDir),
 	}
 	if rep.APIVersionChanges == nil {
@@ -61,8 +61,8 @@ func Diff(module, from, to string) (Report, error) {
 	if rep.ChangedConstants == nil {
 		rep.ChangedConstants = []apidiff.ConstChange{}
 	}
-	if rep.RemovedSymbols == nil {
-		rep.RemovedSymbols = []string{}
+	if rep.RemovedFunctions == nil {
+		rep.RemovedFunctions = []string{}
 	}
 	return rep, nil
 }
@@ -169,7 +169,7 @@ func diffAPIVersions(fromDir, toDir string) []APIVersionChange {
 	return changes
 }
 
-func exportedSymbols(dir string) map[string]bool {
+func exportedFunctions(dir string) map[string]bool {
 	set := map[string]bool{}
 	filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
@@ -187,9 +187,9 @@ func exportedSymbols(dir string) map[string]bool {
 	return set
 }
 
-func removedExportedSymbols(fromDir, toDir string) []string {
-	fromSet := exportedSymbols(fromDir)
-	toSet := exportedSymbols(toDir)
+func removedExportedFunctions(fromDir, toDir string) []string {
+	fromSet := exportedFunctions(fromDir)
+	toSet := exportedFunctions(toDir)
 	var removed []string
 	for name := range fromSet {
 		if !toSet[name] {

@@ -16,7 +16,7 @@ func TestExplain_RendersEveryApplicableSection(t *testing.T) {
 		FromVersion:       "v1.0.0",
 		ToVersion:         "v2.0.0",
 		APIVersionChanges: []depdiff.APIVersionChange{{File: "c.go", From: "2021-01-01", To: "2026-01-01"}},
-		RemovedSymbols:    []string{"OldClient"},
+		RemovedFunctions:  []string{"OldClient"},
 	}
 	md := Explain(rep, verdict.Classify(rep))
 	if !strings.Contains(md, "api-version") {

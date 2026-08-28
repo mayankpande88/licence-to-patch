@@ -3,7 +3,7 @@
 //
 // This is intentionally a PRE-SCREEN, not the final decision. It flags the
 // mechanical facts a diff can prove — a changed REST api-version, a removed
-// exported symbol — and leaves the judgment call (does this matter for THIS
+// exported function — and leaves the judgment call (does this matter for THIS
 // repo? accept, hold, or ask a human?) to the agent and, ultimately, the person
 // approving the action. Deterministic where we can be; the model and the human
 // for everything else.
@@ -24,7 +24,7 @@ const (
 	// Accept: the diff shows nothing that would break a caller.
 	Accept Level = "ACCEPT"
 	// Caution: a change that may break callers but is usually caught by CI
-	// (e.g. a removed exported symbol → compile error).
+	// (e.g. a removed exported function → compile error).
 	Caution Level = "CAUTION"
 	// Hold: a change that can pass green CI and still break at runtime
 	// (e.g. a silently changed REST api-version). This is the dangerous class.
@@ -60,13 +60,13 @@ func Classify(rep depdiff.Report) Verdict {
 			n, ex.File, ex.From, ex.To))
 	}
 
-	if len(rep.RemovedSymbols) > 0 {
+	if len(rep.RemovedFunctions) > 0 {
 		if v.Level == Accept {
 			v.Level = Caution
 		}
 		v.Reasons = append(v.Reasons, fmt.Sprintf(
-			"removes %d exported symbol(s), e.g. %s — callers that use them will fail to compile",
-			len(rep.RemovedSymbols), preview(rep.RemovedSymbols)))
+			"removes %d exported function(s), e.g. %s — callers that use them will fail to compile",
+			len(rep.RemovedFunctions), preview(rep.RemovedFunctions)))
 	}
 
 	// A baked-in constant whose value changed is a runtime behavioral change:
@@ -93,7 +93,7 @@ func Classify(rep depdiff.Report) Verdict {
 	}
 
 	if len(v.Reasons) == 0 {
-		v.Reasons = append(v.Reasons, "no api-version change, no removed exported symbols, and no changed contract constants in the diff")
+		v.Reasons = append(v.Reasons, "no api-version change, no removed exported functions, and no changed contract constants in the diff")
 	}
 	return v
 }
