@@ -96,14 +96,16 @@ You'll see the api-version change in `metricalerts_client.go` (`2024-03-01-previ
 
 1. Start TrueForge: `npx @truefoundry/trueforge` (Node ≥ 22.14) → http://localhost:8790
 2. Settings → Models: add a provider (any — it's model-neutral). Settings → Sandbox providers: add Daytona.
-3. Start the MCP servers (each on loopback):
+3. Start the three MCP servers (each on loopback) with one script — it reads the GitHub token from a gitignored file (`~/.config/lp/github_token`), never the model or sandbox:
    ```
-   go run ./cmd/depdiff-mcp -addr 127.0.0.1:8971
-   GITHUB_TOKEN=… go run ./cmd/review-mcp -addr 127.0.0.1:8972
-   GITHUB_TOKEN=… go run ./cmd/fix-mcp    -addr 127.0.0.1:8973
+   ./scripts/run-mcp-servers.sh
    ```
 4. Settings → Connectors: add each MCP URL (`http://localhost:897{1,2,3}/mcp`, No auth), and the shipped **github** connector with a fine-grained PAT (Contents: read, Pull requests: read & write).
-5. Create the saved agent with the approval policy above (`POST /api/v1/agents`, or the Agents Library UI). Open a session on it and ask it to review a grouped Dependabot PR. The trust brief posts; the fix pauses for your approval.
+5. Create the saved agent from the committed manifest — this is the exact agent used in the demo (model, instructions, and the per-connector approval policy that gates only `fix`):
+   ```
+   curl -X POST http://localhost:8790/api/v1/agents -H 'Content-Type: application/json' -d @agent.json
+   ```
+   Open a session on it and ask it to review a grouped Dependabot PR (e.g. `Review PR #N in owner/repo`). The trust brief posts; the fix pauses for your approval. The agent's [`instructions`](agent.json) are the reasoning logic — the deterministic tools only provide evidence.
 
 ## Demo targets
 
