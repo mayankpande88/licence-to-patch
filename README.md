@@ -107,6 +107,20 @@ You'll see the api-version change in `metricalerts_client.go` (`2024-03-01-previ
    ```
    Open a session on it and ask it to review a grouped Dependabot PR (e.g. `Review PR #N in owner/repo`). The trust brief posts; the fix pauses for your approval. The agent's [`instructions`](agent.json) are the reasoning logic — the deterministic tools only provide evidence.
 
+## Reproduce it yourself
+
+**1. Verify the detector — zero setup, no accounts** (this alone confirms the core claim):
+```
+go run ./tools/depdiff github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/monitor/armmonitor v0.12.0 v0.13.0
+```
+Prints the api-version change and a HOLD. Works on any public Go module; needs only Go.
+
+**2. Run the full agent** — bring your own: a model provider (any; `agent.json` pins Gemini — change the one `model.name` line to use another), a **Daytona** sandbox key, and a GitHub **fine-grained PAT** (Contents: read, Pull requests: read & write). Then follow *Run the agent* above.
+
+**3. Drive the write flow on a PR you own.** The demo repos below are *mine*, so your token can't post/patch on them. To see the trust brief + gated fix end-to-end, **fork a fixture (or use any Go repo), let Dependabot open a grouped PR, and point the agent at your PR**:
+- Fork [`azmetrics-demo`](https://github.com/mayankpande88/azmetrics-demo), enable Dependabot (the grouped `.github/dependabot.yml` ships with it), then `Review PR #N in <you>/azmetrics-demo`.
+- Reading/analysis works on *any* public repo without a fork; only posting a comment or pushing a fix needs write access.
+
 ## Demo targets
 
 - [mayankpande88/azmetrics-demo](https://github.com/mayankpande88/azmetrics-demo) — Go, the `armmonitor` api-version landmine.
